@@ -41,8 +41,7 @@ def main():
             maturity_date = issue_date + timedelta(days=np.random.randint(2*365, 7*365))
 
             fx_currency = "USD"
-            fx_row = fx.sample(1).iloc[0]
-            fx_rate = fx_row.get("fx_rate", 1.0)
+            fx_rate = 1.0
 
             notional_oc = np.random.uniform(10_000_000, 500_000_000)
             notional_usd = notional_oc * fx_rate

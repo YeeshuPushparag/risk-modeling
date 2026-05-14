@@ -34,6 +34,11 @@ bond_features = [
     "maturity_years",
     "benchmark_yield",
     "corporate_yield",
+    "issue_size",
+    "units_issued",
+    "units_outstanding",
+    "market_value",
+    "outstanding_pct"
     # macro
     "gdp", "unrate", "cpi", "fedfunds"
 ]

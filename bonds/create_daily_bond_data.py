@@ -107,7 +107,8 @@ def create_daily_bond_data():
         "issue_date","maturity_date","maturity_years","date",
         "benchmark_yield","corporate_yield","credit_spread","bond_price",
         "yield_to_maturity","implied_hazard","implied_pd_annual",
-        "implied_pd_multi_year","implied_rating","market_synthetic_score"
+        "implied_pd_multi_year","implied_rating","market_synthetic_score", "issue_size",
+        "face_value_per_bond", "units_issued", "units_outstanding", "market_value",
     ]
     daily_data = daily[cols].reset_index(drop=True)
 
