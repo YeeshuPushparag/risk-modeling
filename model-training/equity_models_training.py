@@ -13,11 +13,13 @@ data_folder = os.path.join(os.path.dirname(__file__), 'data', 'final')
 csv_file = os.path.join(data_folder, 'equity.csv')
 models_folder = os.path.join(os.path.dirname(__file__), 'models')
 
+# Create models folder if it doesn't exist
+os.makedirs(models_folder, exist_ok=True)
 
 # ===== DATA LOADING & PREPARATION =====
 df = pd.read_csv(csv_file)
 df['date'] = pd.to_datetime(df['date'])
-df = df.sort_values(['ticker', 'date']).reset_index(drop=True)
+df = df.sort_values(['asset_manager', 'ticker', 'date']).reset_index(drop=True)
 
 # Create target returns
 df['target_ret_1d'] = df.groupby('ticker')['daily_return'].shift(-1)
@@ -421,116 +423,17 @@ print("MACRO REGIME MODEL - Accuracy:", accuracy_score(y_test, preds_regime))
 model_regime.save_model(os.path.join(models_folder, "equity_model_macro_regime_xgb.json"))
 joblib.dump(macro_features, os.path.join(models_folder, "equity_features_macro_regime.pkl"))
 
-
-# THEN create PORTFOLIO targets
+# ===== CREATE PORTFOLIO TARGETS =====
 print("\n=== CREATING PORTFOLIO TARGETS ===")
 for N in [1, 5, 21]:
     df[f"fwd_ret_{N}d"] = df.groupby(["asset_manager","ticker"])["close"].shift(-N) / df["close"] - 1
     df[f"port_ret_contrib_{N}d"] = df["portfolio_weight"] * df[f"fwd_ret_{N}d"]
 
-
-# ===== PORTFOLIO 1D RETURN MODEL =====
-print("\n=== TRAINING PORTFOLIO 1D RETURN MODEL ===")
-portfolio_features_1d = feature_cols + ['fwd_ret_5d', 'port_ret_contrib_5d']
-portfolio_features_1d = [f for f in portfolio_features_1d if f in df.columns]
-
-target_1d = 'port_ret_contrib_1d'
-
-ml_1d = df[portfolio_features_1d + [target_1d]].copy()
-ml_1d = ml_1d.replace([np.inf, -np.inf], np.nan).dropna()
-
-X = ml_1d[portfolio_features_1d].values
-y = ml_1d[target_1d].values
-
-split_idx = int(len(ml_1d) * 0.80)
-val_idx = int(split_idx * 0.90)
-
-X_tr, y_tr = X[:val_idx], y[:val_idx]
-X_val, y_val = X[val_idx:split_idx], y[val_idx:split_idx]
-X_te, y_te = X[split_idx:], y[split_idx:]
-
-dtrain = xgb.DMatrix(X_tr, label=y_tr)
-dval = xgb.DMatrix(X_val, label=y_val)
-dtest = xgb.DMatrix(X_te)
-
-params = {
-    "objective": "reg:squarederror", "eta": 0.01, "max_depth": 4,
-    "subsample": 0.8, "colsample_bytree": 0.7, "eval_metric": "rmse"
-}
-
-watchlist = [(dtrain, "train"), (dval, "val")]
-model_1d = xgb.train(params, dtrain, num_boost_round=4000, evals=watchlist,
-                     early_stopping_rounds=100, verbose_eval=200)
-pred_1d = model_1d.predict(dtest)
-
-print("PORTFOLIO 1D - MSE:", mean_squared_error(y_te, pred_1d), "R2:", r2_score(y_te, pred_1d))
-model_1d.save_model(os.path.join(models_folder, "equity_model_portfolio1d_xgb.json"))
-joblib.dump(portfolio_features_1d, os.path.join(models_folder, "equity_features_portfolio1d.pkl"))
-
-# ===== PORTFOLIO 5D RETURN MODEL =====
-print("\n=== TRAINING PORTFOLIO 5D RETURN MODEL ===")
-portfolio_features_5d = feature_cols + ['fwd_ret_1d', 'port_ret_contrib_1d']
-portfolio_features_5d = [f for f in portfolio_features_5d if f in df.columns]
-
-target_5d = 'port_ret_contrib_5d'
-
-ml_5d = df[portfolio_features_5d + [target_5d]].copy()
-ml_5d = ml_5d.replace([np.inf, -np.inf], np.nan).dropna()
-
-X = ml_5d[portfolio_features_5d].values
-y = ml_5d[target_5d].values
-
-split_idx = int(len(ml_5d) * 0.80)
-val_idx = int(split_idx * 0.90)
-
-X_tr, y_tr = X[:val_idx], y[:val_idx]
-X_val, y_val = X[val_idx:split_idx], y[val_idx:split_idx]
-X_te, y_te = X[split_idx:], y[split_idx:]
-
-dtrain = xgb.DMatrix(X_tr, label=y_tr)
-dval = xgb.DMatrix(X_val, label=y_val)
-dtest = xgb.DMatrix(X_te)
-
-model_5d = xgb.train(params, dtrain, num_boost_round=4000, evals=watchlist,
-                     early_stopping_rounds=100, verbose_eval=200)
-pred_5d = model_5d.predict(dtest)
-
-print("PORTFOLIO 5D - MSE:", mean_squared_error(y_te, pred_5d), "R2:", r2_score(y_te, pred_5d))
-model_5d.save_model(os.path.join(models_folder, "equity_model_portfolio5d_xgb.json"))
-joblib.dump(portfolio_features_5d, os.path.join(models_folder, "equity_features_portfolio5d.pkl"))
-
-# ===== PORTFOLIO 21D RETURN MODEL =====
-print("\n=== TRAINING PORTFOLIO 21D RETURN MODEL ===")
-portfolio_features_21d = feature_cols + ['fwd_ret_1d', 'fwd_ret_5d', 'port_ret_contrib_1d', 'port_ret_contrib_5d']
-portfolio_features_21d = [f for f in portfolio_features_21d if f in df.columns]
-
-target_21d = 'port_ret_contrib_21d'
-
-ml_21d = df[portfolio_features_21d + [target_21d]].copy()
-ml_21d = ml_21d.replace([np.inf, -np.inf], np.nan).dropna()
-
-X = ml_21d[portfolio_features_21d].values
-y = ml_21d[target_21d].values
-
-split_idx = int(len(ml_21d) * 0.80)
-val_idx = int(split_idx * 0.90)
-
-X_tr, y_tr = X[:val_idx], y[:val_idx]
-X_val, y_val = X[val_idx:split_idx], y[val_idx:split_idx]
-X_te, y_te = X[split_idx:], y[split_idx:]
-
-dtrain = xgb.DMatrix(X_tr, label=y_tr)
-dval = xgb.DMatrix(X_val, label=y_val)
-dtest = xgb.DMatrix(X_te)
-
-model_21d = xgb.train(params, dtrain, num_boost_round=4000, evals=watchlist,
-                      early_stopping_rounds=100, verbose_eval=200)
-pred_21d = model_21d.predict(dtest)
-
-print("PORTFOLIO 21D - MSE:", mean_squared_error(y_te, pred_21d), "R2:", r2_score(y_te, pred_21d))
-model_21d.save_model(os.path.join(models_folder, "equity_model_portfolio21d_xgb.json"))
-joblib.dump(portfolio_features_21d, os.path.join(models_folder, "equity_features_portfolio21d.pkl"))
-
+# ===== CREATE HISTORICAL FEATURES (NO LEAKAGE) =====
+print("\n=== CREATING HISTORICAL FEATURES ===")
+for N in [1, 5, 21]:
+    df[f"lag_ret_{N}d"] = df.groupby(["asset_manager", "ticker"])["close"].pct_change(N)
+    df[f"lag_port_ret_contrib_{N}d"] = df["portfolio_weight"] * df[f"lag_ret_{N}d"]
 
 # ===== PORTFOLIO VaR 1D MODEL =====
 print("\n=== TRAINING PORTFOLIO VaR 1D MODEL ===")
@@ -580,8 +483,6 @@ print("PORTFOLIO VaR 1D - MSE:", mean_squared_error(y_te, pred_var_1d), "R2:", r
 model_var_1d.save_model(os.path.join(models_folder, "equity_model_portfolio_var_1d_xgb.json"))
 joblib.dump(portfolio_var_features, os.path.join(models_folder, "equity_features_portfolio_var_1d.pkl"))
 
-
-
 # ===== PORTFOLIO VaR 5D MODEL =====
 print("\n=== TRAINING PORTFOLIO VaR 5D MODEL ===")
 df['target_portfolio_var_5d'] = df.groupby('ticker')['daily_portfolio_VaR_95'].shift(-5)
@@ -617,9 +518,6 @@ print("PORTFOLIO VaR 5D - MSE:", mean_squared_error(y_te, pred_var_5d), "R2:", r
 model_var_5d.save_model(os.path.join(models_folder, "equity_model_portfolio_var_5d_xgb.json"))
 joblib.dump(portfolio_var_features, os.path.join(models_folder, "equity_features_portfolio_var_5d.pkl"))
 
-
-
-
 # ===== PORTFOLIO VaR 21D MODEL =====
 print("\n=== TRAINING PORTFOLIO VaR 21D MODEL ===")
 df['target_portfolio_var_21d'] = df.groupby('ticker')['daily_portfolio_VaR_95'].shift(-21)
@@ -654,4 +552,256 @@ pred_var_21d = model_var_21d.predict(dtest)
 print("PORTFOLIO VaR 21D - MSE:", mean_squared_error(y_te, pred_var_21d), "R2:", r2_score(y_te, pred_var_21d))
 model_var_21d.save_model(os.path.join(models_folder, "equity_model_portfolio_var_21d_xgb.json"))
 joblib.dump(portfolio_var_features, os.path.join(models_folder, "equity_features_portfolio_var_21d.pkl"))
+
+# ===== PORTFOLIO 1D RETURN MODEL =====
+print("\n=== TRAINING PORTFOLIO 1D RETURN MODEL ===")
+
+portfolio_features_1d = (
+    feature_cols +
+    [
+        "lag_ret_5d",
+        "lag_port_ret_contrib_5d"
+    ]
+)
+
+portfolio_features_1d = [
+    f for f in portfolio_features_1d
+    if f in df.columns
+]
+
+target_1d = "port_ret_contrib_1d"
+
+ml_1d = df[
+    portfolio_features_1d + [target_1d]
+].copy()
+
+ml_1d = (
+    ml_1d
+    .replace([np.inf, -np.inf], np.nan)
+    .dropna()
+)
+
+X = ml_1d[portfolio_features_1d].values
+y = ml_1d[target_1d].values
+
+split_idx = int(len(ml_1d) * 0.80)
+val_idx = int(split_idx * 0.90)
+
+X_tr, y_tr = X[:val_idx], y[:val_idx]
+X_val, y_val = X[val_idx:split_idx], y[val_idx:split_idx]
+X_te, y_te = X[split_idx:], y[split_idx:]
+
+dtrain = xgb.DMatrix(X_tr, label=y_tr)
+dval = xgb.DMatrix(X_val, label=y_val)
+dtest = xgb.DMatrix(X_te)
+
+params_port = {
+    "objective": "reg:squarederror",
+    "eta": 0.01,
+    "max_depth": 4,
+    "subsample": 0.8,
+    "colsample_bytree": 0.7,
+    "eval_metric": "rmse",
+    "tree_method": "hist"
+}
+
+watchlist = [
+    (dtrain, "train"),
+    (dval, "val")
+]
+
+model_1d_port = xgb.train(
+    params_port,
+    dtrain,
+    num_boost_round=4000,
+    evals=watchlist,
+    early_stopping_rounds=100,
+    verbose_eval=200
+)
+
+pred_1d_port = model_1d_port.predict(dtest)
+
+print(
+    "PORTFOLIO 1D - MSE:",
+    mean_squared_error(y_te, pred_1d_port),
+    "R2:",
+    r2_score(y_te, pred_1d_port)
+)
+
+model_1d_port.save_model(
+    os.path.join(models_folder, "equity_model_portfolio1d_xgb.json")
+)
+
+joblib.dump(
+    portfolio_features_1d,
+    os.path.join(models_folder, "equity_features_portfolio1d.pkl")
+)
+
+# ===== PORTFOLIO 5D RETURN MODEL =====
+print("\n=== TRAINING PORTFOLIO 5D RETURN MODEL ===")
+
+portfolio_features_5d = (
+    feature_cols +
+    [
+        "lag_ret_1d",
+        "lag_port_ret_contrib_1d"
+    ]
+)
+
+portfolio_features_5d = [
+    f for f in portfolio_features_5d
+    if f in df.columns
+]
+
+target_5d = "port_ret_contrib_5d"
+
+ml_5d = df[
+    portfolio_features_5d + [target_5d]
+].copy()
+
+ml_5d = (
+    ml_5d
+    .replace([np.inf, -np.inf], np.nan)
+    .dropna()
+)
+
+X = ml_5d[portfolio_features_5d].values
+y = ml_5d[target_5d].values
+
+split_idx = int(len(ml_5d) * 0.80)
+val_idx = int(split_idx * 0.90)
+
+X_tr, y_tr = X[:val_idx], y[:val_idx]
+X_val, y_val = X[val_idx:split_idx], y[val_idx:split_idx]
+X_te, y_te = X[split_idx:], y[split_idx:]
+
+dtrain = xgb.DMatrix(X_tr, label=y_tr)
+dval = xgb.DMatrix(X_val, label=y_val)
+dtest = xgb.DMatrix(X_te)
+
+watchlist = [
+    (dtrain, "train"),
+    (dval, "val")
+]
+
+model_5d_port = xgb.train(
+    params_port,
+    dtrain,
+    num_boost_round=4000,
+    evals=watchlist,
+    early_stopping_rounds=100,
+    verbose_eval=200
+)
+
+pred_5d_port = model_5d_port.predict(dtest)
+
+print(
+    "PORTFOLIO 5D - MSE:",
+    mean_squared_error(y_te, pred_5d_port),
+    "R2:",
+    r2_score(y_te, pred_5d_port)
+)
+
+model_5d_port.save_model(
+    os.path.join(models_folder, "equity_model_portfolio5d_xgb.json")
+)
+
+joblib.dump(
+    portfolio_features_5d,
+    os.path.join(models_folder, "equity_features_portfolio5d.pkl")
+)
+
+# ===== PORTFOLIO 21D RETURN MODEL =====
+print("\n=== TRAINING PORTFOLIO 21D RETURN MODEL ===")
+
+portfolio_features_21d = (
+    feature_cols +
+    [
+        "lag_ret_1d",
+        "lag_ret_5d",
+        "lag_port_ret_contrib_1d",
+        "lag_port_ret_contrib_5d"
+    ]
+)
+
+portfolio_features_21d = [
+    f for f in portfolio_features_21d
+    if f in df.columns
+]
+
+target_21d = "port_ret_contrib_21d"
+
+ml_21d = df[
+    portfolio_features_21d + [target_21d]
+].copy()
+
+ml_21d = (
+    ml_21d
+    .replace([np.inf, -np.inf], np.nan)
+    .dropna()
+)
+
+X = ml_21d[portfolio_features_21d].values
+y = ml_21d[target_21d].values
+
+split_idx = int(len(ml_21d) * 0.80)
+val_idx = int(split_idx * 0.90)
+
+X_tr, y_tr = X[:val_idx], y[:val_idx]
+X_val, y_val = X[val_idx:split_idx], y[val_idx:split_idx]
+X_te, y_te = X[split_idx:], y[split_idx:]
+
+dtrain = xgb.DMatrix(X_tr, label=y_tr)
+dval = xgb.DMatrix(X_val, label=y_val)
+dtest = xgb.DMatrix(X_te)
+
+watchlist = [
+    (dtrain, "train"),
+    (dval, "val")
+]
+
+model_21d_port = xgb.train(
+    params_port,
+    dtrain,
+    num_boost_round=4000,
+    evals=watchlist,
+    early_stopping_rounds=100,
+    verbose_eval=200
+)
+
+pred_21d_port = model_21d_port.predict(dtest)
+
+print(
+    "PORTFOLIO 21D - MSE:",
+    mean_squared_error(y_te, pred_21d_port),
+    "R2:",
+    r2_score(y_te, pred_21d_port)
+)
+
+model_21d_port.save_model(
+    os.path.join(models_folder, "equity_model_portfolio21d_xgb.json")
+)
+
+joblib.dump(
+    portfolio_features_21d,
+    os.path.join(models_folder, "equity_features_portfolio21d.pkl")
+)
+
 print("\n=== ALL 15 MODELS TRAINED AND SAVED SUCCESSFULLY! ===")
+print("\nModels saved in:", models_folder)
+print("\nModel Summary:")
+print("1. 1-Day Return Model")
+print("2. 5-Day Return Model")
+print("3. 21-Day Return Model")
+print("4. Volatility Forecast Model")
+print("5. Downside Risk Model")
+print("6. VaR Model")
+print("7. Factor Return Model")
+print("8. Sector Rotation Model")
+print("9. Macro Regime Model")
+print("10. Portfolio VaR 1D Model")
+print("11. Portfolio VaR 5D Model")
+print("12. Portfolio VaR 21D Model")
+print("13. Portfolio 1D Return Model")
+print("14. Portfolio 5D Return Model")
+print("15. Portfolio 21D Return Model")
